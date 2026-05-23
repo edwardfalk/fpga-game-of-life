@@ -14,6 +14,8 @@ set_global_assignment -name VHDL_FILE vhdl/vga_renderer.vhd
 set_global_assignment -name VHDL_FILE vhdl/pattern_rom.vhd
 set_global_assignment -name VHDL_FILE vhdl/pattern_loader.vhd
 set_global_assignment -name VHDL_FILE vhdl/gol_engine.vhd
+set_global_assignment -name VHDL_FILE vhdl/debounce.vhd
+set_global_assignment -name VHDL_FILE vhdl/control_fsm.vhd
 
 set_global_assignment -name RESERVE_ALL_UNUSED_PINS "AS INPUT TRI-STATED"
 set_global_assignment -name STRATIX_DEVICE_IO_STANDARD "3.3-V LVTTL"

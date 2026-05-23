@@ -22,8 +22,15 @@ architecture rtl of top is
 
     signal cur_buf : std_logic := '0';
 
+    -- Debounced KEY signals
+    signal key1_db, key2_db, key3_db : std_logic;
+    signal key1_pulse, key2_pulse, key3_pulse : std_logic;
+
+    -- Control FSM
+    signal paused_sig : std_logic;
+    signal loader_start, engine_start : std_logic;
+
     -- Pattern loader
-    signal loader_start  : std_logic := '0';
     signal loader_busy   : std_logic;
     signal loader_done   : std_logic;
     signal loader_wr_addr: unsigned(12 downto 0);
@@ -32,7 +39,6 @@ architecture rtl of top is
     signal loader_wr_buf : std_logic;
 
     -- GoL engine
-    signal engine_start  : std_logic := '0';
     signal engine_busy   : std_logic;
     signal engine_done   : std_logic;
     signal engine_rd_addr: unsigned(12 downto 0);
@@ -46,16 +52,13 @@ architecture rtl of top is
     signal vga_cell_addr  : unsigned(12 downto 0);
     signal vga_cell_alive : std_logic;
 
-    -- Muxing av BRAM-portar
+    -- Grid muxes
     signal grid_wr_addr : unsigned(12 downto 0);
     signal grid_wr_data : std_logic;
     signal grid_wr_en   : std_logic;
     signal grid_wr_buf  : std_logic;
     signal grid_rd_addr : unsigned(12 downto 0);
     signal grid_rd_data : std_logic;
-
-    -- KEY[3] flank-detektor
-    signal key3_prev : std_logic := '1';
 begin
     clk_div: entity work.clk25_div
         port map (
@@ -64,17 +67,34 @@ begin
             clk25_out => clk25
         );
 
-    -- KEY[3] -> trigga pattern_loader
-    trigger: process(clk25)
-    begin
-        if rising_edge(clk25) then
-            loader_start <= '0';
-            if key3_prev = '1' and key(3) = '0' then
-                loader_start <= '1';
-            end if;
-            key3_prev <= key(3);
-        end if;
-    end process;
+    -- Debouncers
+    db_key1: entity work.debounce
+        port map (clk => clk25, reset_n => '1', raw_in => key(1),
+                  db_out => key1_db, press_pulse => key1_pulse);
+
+    db_key2: entity work.debounce
+        port map (clk => clk25, reset_n => '1', raw_in => key(2),
+                  db_out => key2_db, press_pulse => key2_pulse);
+
+    db_key3: entity work.debounce
+        port map (clk => clk25, reset_n => '1', raw_in => key(3),
+                  db_out => key3_db, press_pulse => key3_pulse);
+
+    -- Control FSM
+    ctrl: entity work.control_fsm
+        port map (
+            clk            => clk25,
+            reset_n        => '1',
+            vsync_pulse    => vsync_pulse,
+            pause_pulse    => key2_pulse,
+            step_pulse     => key1_pulse,
+            load_pulse     => key3_pulse,
+            engine_done    => engine_done,
+            speed_sel      => unsigned(sw(5 downto 3)),
+            paused         => paused_sig,
+            trigger_engine => engine_start,
+            trigger_load   => loader_start
+        );
 
     loader: entity work.pattern_loader
         port map (
@@ -109,18 +129,7 @@ begin
             done        => engine_done
         );
 
-    -- Engine triggas av vsync_pulse, BARA om loader inte ar igang
-    engine_trigger: process(clk25)
-    begin
-        if rising_edge(clk25) then
-            engine_start <= '0';
-            if vsync_pulse = '1' and loader_busy = '0' and engine_busy = '0' then
-                engine_start <= '1';
-            end if;
-        end if;
-    end process;
-
-    -- Vid engine_done: toggla cur_buf
+    -- Toggle cur_buf vid engine_done
     buf_toggle: process(clk25)
     begin
         if rising_edge(clk25) then
@@ -130,13 +139,13 @@ begin
         end if;
     end process;
 
-    -- Mux skriv-port: loader nar busy, annars engine
+    -- Mux skriv-port
     grid_wr_addr <= loader_wr_addr when loader_busy = '1' else engine_wr_addr;
     grid_wr_data <= loader_wr_data when loader_busy = '1' else engine_wr_data;
     grid_wr_en   <= loader_wr_en   when loader_busy = '1' else engine_wr_en;
     grid_wr_buf  <= loader_wr_buf  when loader_busy = '1' else engine_wr_buf;
 
-    -- Mux las-port: engine nar busy, annars VGA
+    -- Mux las-port
     grid_rd_addr   <= engine_rd_addr when engine_busy = '1' else vga_cell_addr;
     vga_cell_alive <= grid_rd_data;
     engine_rd_data <= grid_rd_data;
@@ -167,5 +176,5 @@ begin
             vsync_pulse => vsync_pulse
         );
 
-    ledr <= "00000000" & engine_busy & loader_busy;
+    ledr <= "0000000" & paused_sig & engine_busy & loader_busy;
 end architecture rtl;
