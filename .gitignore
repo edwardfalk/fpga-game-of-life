@@ -1,0 +1,18 @@
+# Quartus build artifacts
+output_files/
+db/
+incremental_db/
+*.qws
+*.qpf.bak
+
+# GHDL simulation artifacts
+work/
+*.cf
+*.o
+*.vcd
+*.ghw
+
+# Editor backups
+*~
+*.bak
+.vscode/
