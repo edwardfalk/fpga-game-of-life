@@ -18,20 +18,43 @@ end entity top;
 
 architecture rtl of top is
     signal clk25       : std_logic;
+    signal vsync_pulse : std_logic;
 
+    signal cur_buf : std_logic := '0';
+
+    -- Pattern loader
+    signal loader_start  : std_logic := '0';
+    signal loader_busy   : std_logic;
+    signal loader_done   : std_logic;
+    signal loader_wr_addr: unsigned(12 downto 0);
+    signal loader_wr_data: std_logic;
+    signal loader_wr_en  : std_logic;
+    signal loader_wr_buf : std_logic;
+
+    -- GoL engine
+    signal engine_start  : std_logic := '0';
+    signal engine_busy   : std_logic;
+    signal engine_done   : std_logic;
+    signal engine_rd_addr: unsigned(12 downto 0);
+    signal engine_rd_data: std_logic;
+    signal engine_wr_addr: unsigned(12 downto 0);
+    signal engine_wr_data: std_logic;
+    signal engine_wr_en  : std_logic;
+    signal engine_wr_buf : std_logic;
+
+    -- VGA
     signal vga_cell_addr  : unsigned(12 downto 0);
     signal vga_cell_alive : std_logic;
-    signal vsync_pulse    : std_logic;
 
-    signal loader_start : std_logic := '0';
-    signal loader_busy  : std_logic;
-    signal loader_done  : std_logic;
-    signal loader_wr_addr : unsigned(12 downto 0);
-    signal loader_wr_data : std_logic;
-    signal loader_wr_en   : std_logic;
-    signal loader_wr_buf  : std_logic;
+    -- Muxing av BRAM-portar
+    signal grid_wr_addr : unsigned(12 downto 0);
+    signal grid_wr_data : std_logic;
+    signal grid_wr_en   : std_logic;
+    signal grid_wr_buf  : std_logic;
+    signal grid_rd_addr : unsigned(12 downto 0);
+    signal grid_rd_data : std_logic;
 
-    -- KEY[3]-trigger: detektera nedtryckning (active-low key, sa fallande flank)
+    -- KEY[3] flank-detektor
     signal key3_prev : std_logic := '1';
 begin
     clk_div: entity work.clk25_div
@@ -41,7 +64,7 @@ begin
             clk25_out => clk25
         );
 
-    -- Load-trigger: nedtryckning av KEY[3]
+    -- KEY[3] -> trigga pattern_loader
     trigger: process(clk25)
     begin
         if rising_edge(clk25) then
@@ -59,7 +82,7 @@ begin
             reset_n     => '1',
             start       => loader_start,
             pattern_sel => unsigned(sw(2 downto 0)),
-            dst_buffer  => '0',
+            dst_buffer  => cur_buf,
             wr_addr     => loader_wr_addr,
             wr_data     => loader_wr_data,
             wr_en       => loader_wr_en,
@@ -68,16 +91,66 @@ begin
             done        => loader_done
         );
 
+    engine: entity work.gol_engine
+        port map (
+            clk         => clk25,
+            reset_n     => '1',
+            start       => engine_start,
+            toroidal    => '1',
+            src_buffer  => cur_buf,
+            dst_buffer  => not cur_buf,
+            rd_addr     => engine_rd_addr,
+            rd_data     => engine_rd_data,
+            wr_addr     => engine_wr_addr,
+            wr_data     => engine_wr_data,
+            wr_en       => engine_wr_en,
+            wr_buffer_o => engine_wr_buf,
+            busy        => engine_busy,
+            done        => engine_done
+        );
+
+    -- Engine triggas av vsync_pulse, BARA om loader inte ar igang
+    engine_trigger: process(clk25)
+    begin
+        if rising_edge(clk25) then
+            engine_start <= '0';
+            if vsync_pulse = '1' and loader_busy = '0' and engine_busy = '0' then
+                engine_start <= '1';
+            end if;
+        end if;
+    end process;
+
+    -- Vid engine_done: toggla cur_buf
+    buf_toggle: process(clk25)
+    begin
+        if rising_edge(clk25) then
+            if engine_done = '1' then
+                cur_buf <= not cur_buf;
+            end if;
+        end if;
+    end process;
+
+    -- Mux skriv-port: loader nar busy, annars engine
+    grid_wr_addr <= loader_wr_addr when loader_busy = '1' else engine_wr_addr;
+    grid_wr_data <= loader_wr_data when loader_busy = '1' else engine_wr_data;
+    grid_wr_en   <= loader_wr_en   when loader_busy = '1' else engine_wr_en;
+    grid_wr_buf  <= loader_wr_buf  when loader_busy = '1' else engine_wr_buf;
+
+    -- Mux las-port: engine nar busy, annars VGA
+    grid_rd_addr   <= engine_rd_addr when engine_busy = '1' else vga_cell_addr;
+    vga_cell_alive <= grid_rd_data;
+    engine_rd_data <= grid_rd_data;
+
     grid: entity work.grid_bram
         port map (
             clk       => clk25,
-            wr_addr   => loader_wr_addr,
-            wr_data   => loader_wr_data,
-            wr_en     => loader_wr_en,
-            wr_buffer => loader_wr_buf,
-            rd_addr   => vga_cell_addr,
-            rd_data   => vga_cell_alive,
-            rd_buffer => '0'
+            wr_addr   => grid_wr_addr,
+            wr_data   => grid_wr_data,
+            wr_en     => grid_wr_en,
+            wr_buffer => grid_wr_buf,
+            rd_addr   => grid_rd_addr,
+            rd_data   => grid_rd_data,
+            rd_buffer => cur_buf
         );
 
     vga: entity work.vga_renderer
@@ -94,5 +167,5 @@ begin
             vsync_pulse => vsync_pulse
         );
 
-    ledr <= "00000000" & loader_busy & loader_done;
+    ledr <= "00000000" & engine_busy & loader_busy;
 end architecture rtl;
