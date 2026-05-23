@@ -9,7 +9,7 @@ WORK = --workdir=work
 FLAGS = $(STD) $(WORK)
 
 # Lista alla kallor har nar modulerna skapas
-SRCS = vhdl/top.vhd vhdl/clk25_div.vhd
+SRCS = vhdl/top.vhd vhdl/clk25_div.vhd vhdl/vga_timing.vhd
 
 work:
 	mkdir -p work
