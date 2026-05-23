@@ -18,75 +18,74 @@ end entity top;
 
 architecture rtl of top is
     signal clk25       : std_logic;
-    signal reset_n     : std_logic;
-    signal cell_addr   : unsigned(12 downto 0);
-    signal cell_alive  : std_logic;
-    signal vsync_pulse : std_logic;
 
-    -- Init-signaler for att ladda monstret en gang
-    signal init_done : std_logic := '0';
-    signal init_addr : unsigned(12 downto 0) := (others => '0');
-    signal init_data : std_logic := '0';
-    signal init_en   : std_logic := '0';
+    signal vga_cell_addr  : unsigned(12 downto 0);
+    signal vga_cell_alive : std_logic;
+    signal vsync_pulse    : std_logic;
 
-    -- Hardkodat monster: ett kors i mitten (cell 40,30 och dess 4 grannar)
-    -- Center addr = 30*80 + 40 = 2440
-    -- Up: 29*80+40=2360, Down: 31*80+40=2520, Left: 30*80+39=2439, Right: 30*80+41=2441
-    type addr_arr is array (0 to 4) of integer;
-    constant CROSS_ADDRS : addr_arr := (2440, 2360, 2520, 2439, 2441);
+    signal loader_start : std_logic := '0';
+    signal loader_busy  : std_logic;
+    signal loader_done  : std_logic;
+    signal loader_wr_addr : unsigned(12 downto 0);
+    signal loader_wr_data : std_logic;
+    signal loader_wr_en   : std_logic;
+    signal loader_wr_buf  : std_logic;
+
+    -- KEY[3]-trigger: detektera nedtryckning (active-low key, sa fallande flank)
+    signal key3_prev : std_logic := '1';
 begin
-    reset_n <= key(3);
-
     clk_div: entity work.clk25_div
         port map (
             clk50_in  => clk50,
-            reset_n   => reset_n,
+            reset_n   => '1',
             clk25_out => clk25
         );
 
-    -- Init-process: vid uppstart, skriv CROSS_ADDRS till buffer 0
-    init: process(clk25, reset_n)
-        variable idx : integer range 0 to 5 := 0;
+    -- Load-trigger: nedtryckning av KEY[3]
+    trigger: process(clk25)
     begin
-        if reset_n = '0' then
-            idx := 0;
-            init_en   <= '0';
-            init_done <= '0';
-        elsif rising_edge(clk25) then
-            if init_done = '0' then
-                if idx < 5 then
-                    init_addr <= to_unsigned(CROSS_ADDRS(idx), 13);
-                    init_data <= '1';
-                    init_en   <= '1';
-                    idx := idx + 1;
-                else
-                    init_en   <= '0';
-                    init_done <= '1';
-                end if;
-            else
-                init_en <= '0';
+        if rising_edge(clk25) then
+            loader_start <= '0';
+            if key3_prev = '1' and key(3) = '0' then
+                loader_start <= '1';
             end if;
+            key3_prev <= key(3);
         end if;
     end process;
+
+    loader: entity work.pattern_loader
+        port map (
+            clk         => clk25,
+            reset_n     => '1',
+            start       => loader_start,
+            pattern_sel => unsigned(sw(2 downto 0)),
+            dst_buffer  => '0',
+            wr_addr     => loader_wr_addr,
+            wr_data     => loader_wr_data,
+            wr_en       => loader_wr_en,
+            wr_buffer_o => loader_wr_buf,
+            busy        => loader_busy,
+            done        => loader_done
+        );
 
     grid: entity work.grid_bram
         port map (
             clk       => clk25,
-            wr_addr   => init_addr,
-            wr_data   => init_data,
-            wr_en     => init_en,
-            wr_buffer => '0',
-            rd_addr   => cell_addr,
-            rd_data   => cell_alive,
+            wr_addr   => loader_wr_addr,
+            wr_data   => loader_wr_data,
+            wr_en     => loader_wr_en,
+            wr_buffer => loader_wr_buf,
+            rd_addr   => vga_cell_addr,
+            rd_data   => vga_cell_alive,
             rd_buffer => '0'
         );
 
     vga: entity work.vga_renderer
         port map (
             clk25       => clk25,
-            reset_n     => reset_n,
-            cell_alive  => cell_alive,
-            cell_addr   => cell_addr,
+            reset_n     => '1',
+            cell_alive  => vga_cell_alive,
+            cell_addr   => vga_cell_addr,
             vga_r       => vga_r,
             vga_g       => vga_g,
             vga_b       => vga_b,
@@ -95,5 +94,5 @@ begin
             vsync_pulse => vsync_pulse
         );
 
-    ledr <= "000000000" & init_done;  -- LEDR[0] tands nar init klart
+    ledr <= "00000000" & loader_busy & loader_done;
 end architecture rtl;
