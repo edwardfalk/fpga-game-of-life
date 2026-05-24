@@ -58,6 +58,9 @@ architecture rtl of top is
     signal vga_cell_addr  : unsigned(12 downto 0);
     signal vga_cell_alive : std_logic;
 
+    -- Population count from engine
+    signal engine_pop_out : unsigned(12 downto 0);
+
     -- Generation counter
     signal generation : unsigned(13 downto 0) := (others => '0');  -- 0..9999, wraps
     signal gen_d0, gen_d1, gen_d2, gen_d3 : unsigned(3 downto 0);
@@ -136,7 +139,8 @@ begin
             wr_en       => engine_wr_en,
             wr_buffer_o => engine_wr_buf,
             busy        => engine_busy,
-            done        => engine_done
+            done        => engine_done,
+            pop_out     => engine_pop_out
         );
 
     -- Toggle cur_buf vid engine_done
@@ -186,7 +190,19 @@ begin
             vsync_pulse => vsync_pulse
         );
 
-    ledr <= "0000000" & paused_sig & engine_busy & loader_busy;
+    -- Population 0..4800. 10 LEDR-steg -> ~480 per steg.
+    ledr_gen: process(engine_pop_out)
+        variable v : integer;
+    begin
+        v := to_integer(engine_pop_out);
+        for i in 0 to 9 loop
+            if v >= (i+1) * 480 then
+                ledr(i) <= '1';
+            else
+                ledr(i) <= '0';
+            end if;
+        end loop;
+    end process;
 
     -- Generation counter: increment on engine_done, reset on loader_done
     gen_count: process(clk25)

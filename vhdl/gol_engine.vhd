@@ -28,7 +28,8 @@ entity gol_engine is
         wr_en       : out std_logic;
         wr_buffer_o : out std_logic;
         busy        : out std_logic;
-        done        : out std_logic
+        done        : out std_logic;
+        pop_out     : out unsigned(12 downto 0)  -- Live cell count from last generation
     );
 end entity gol_engine;
 
@@ -96,6 +97,9 @@ architecture rtl of gol_engine is
 
     signal cur_valid : std_logic_vector(0 to 9) := (others => '0');
     signal new_alive_comb : std_logic;
+
+    signal pop_acc : unsigned(12 downto 0) := (others => '0');
+    signal pop_reg : unsigned(12 downto 0) := (others => '0');
 begin
     -- Conway's regel kombinatoriskt
     new_alive_comb <= '1' when (self_alive = '1' and (nbr_count = 2 or nbr_count = 3))
@@ -118,6 +122,8 @@ begin
             wr_en      <= '0';
             done       <= '0';
             cur_valid  <= (others => '0');
+            pop_acc    <= (others => '0');
+            pop_reg    <= (others => '0');
         elsif rising_edge(clk) then
             wr_en <= '0';
             done  <= '0';
@@ -132,6 +138,7 @@ begin
                         nbr_count  <= (others => '0');
                         self_alive <= '0';
                         cur_valid  <= (others => '0');
+                        pop_acc    <= (others => '0');
                         state      <= S_FETCH;
                     end if;
 
@@ -195,6 +202,11 @@ begin
                     wr_en       <= '1';
                     wr_buffer_o <= dst_buffer;
 
+                    -- Accumulate live count
+                    if new_alive_comb = '1' then
+                        pop_acc <= pop_acc + 1;
+                    end if;
+
                     -- Nasta cell
                     nbr_count  <= (others => '0');
                     self_alive <= '0';
@@ -216,11 +228,15 @@ begin
                     end if;
 
                 when S_DONE =>
-                    done  <= '1';
-                    state <= S_IDLE;
+                    done    <= '1';
+                    -- Latch final population count, reset accumulator
+                    pop_reg <= pop_acc;
+                    pop_acc <= (others => '0');
+                    state   <= S_IDLE;
             end case;
         end if;
     end process;
 
-    busy <= '0' when state = S_IDLE else '1';
+    busy    <= '0' when state = S_IDLE else '1';
+    pop_out <= pop_reg;
 end architecture rtl;
