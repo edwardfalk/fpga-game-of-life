@@ -219,6 +219,8 @@ begin
     dec1: entity work.hex_decoder port map (nibble => gen_d1, seg => hex1);
     dec2: entity work.hex_decoder port map (nibble => gen_d2, seg => hex2);
     dec3: entity work.hex_decoder port map (nibble => gen_d3, seg => hex3);
-    hex4 <= "1111111";  -- placeholder, Task 15 fills in
+    -- HEX4 visar "P" nar pausad, annars slackt
+    -- "P" pa 7-seg ar segment a, b, e, f, g aktiva. Aktiv-lag, sa "0001100"
+    hex4 <= "0001100" when paused_sig = '1' else "1111111";
     hex5 <= "1111111";  -- HEX5 has dead segments d+e physically
 end architecture rtl;
