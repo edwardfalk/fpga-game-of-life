@@ -12,7 +12,13 @@ entity top is
         vga_g  : out std_logic_vector(3 downto 0);
         vga_b  : out std_logic_vector(3 downto 0);
         vga_hs : out std_logic;
-        vga_vs : out std_logic
+        vga_vs : out std_logic;
+        hex0   : out std_logic_vector(6 downto 0);
+        hex1   : out std_logic_vector(6 downto 0);
+        hex2   : out std_logic_vector(6 downto 0);
+        hex3   : out std_logic_vector(6 downto 0);
+        hex4   : out std_logic_vector(6 downto 0);
+        hex5   : out std_logic_vector(6 downto 0)
     );
 end entity top;
 
@@ -51,6 +57,10 @@ architecture rtl of top is
     -- VGA
     signal vga_cell_addr  : unsigned(12 downto 0);
     signal vga_cell_alive : std_logic;
+
+    -- Generation counter
+    signal generation : unsigned(13 downto 0) := (others => '0');  -- 0..9999, wraps
+    signal gen_d0, gen_d1, gen_d2, gen_d3 : unsigned(3 downto 0);
 
     -- Grid muxes
     signal grid_wr_addr : unsigned(12 downto 0);
@@ -177,4 +187,38 @@ begin
         );
 
     ledr <= "0000000" & paused_sig & engine_busy & loader_busy;
+
+    -- Generation counter: increment on engine_done, reset on loader_done
+    gen_count: process(clk25)
+    begin
+        if rising_edge(clk25) then
+            if loader_done = '1' then
+                generation <= (others => '0');
+            elsif engine_done = '1' then
+                if generation = to_unsigned(9999, 14) then
+                    generation <= (others => '0');
+                else
+                    generation <= generation + 1;
+                end if;
+            end if;
+        end if;
+    end process;
+
+    -- BCD decomposition
+    bcd: process(generation)
+        variable v : integer;
+    begin
+        v := to_integer(generation);
+        gen_d0 <= to_unsigned(v mod 10, 4);
+        gen_d1 <= to_unsigned((v / 10) mod 10, 4);
+        gen_d2 <= to_unsigned((v / 100) mod 10, 4);
+        gen_d3 <= to_unsigned((v / 1000) mod 10, 4);
+    end process;
+
+    dec0: entity work.hex_decoder port map (nibble => gen_d0, seg => hex0);
+    dec1: entity work.hex_decoder port map (nibble => gen_d1, seg => hex1);
+    dec2: entity work.hex_decoder port map (nibble => gen_d2, seg => hex2);
+    dec3: entity work.hex_decoder port map (nibble => gen_d3, seg => hex3);
+    hex4 <= "1111111";  -- placeholder, Task 15 fills in
+    hex5 <= "1111111";  -- HEX5 has dead segments d+e physically
 end architecture rtl;
