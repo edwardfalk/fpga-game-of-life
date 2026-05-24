@@ -5,7 +5,8 @@ use ieee.numeric_std.all;
 -- Game of Life-engine.
 -- Pa start='1': scanna alla 4800 celler. For varje cell:
 --   1. Las 9 lasningar (8 grannar + self) seriellt, en per cykel
---   2. Med 1 cykels BRAM-latens betyder det: lasing N kommer in cykel N+1
+--   2. BRAM-latens ar 2 cykler: rd_addr satt vid cykel N -> rd_data giltig vid cykel N+2
+--      (bero pa VHDL-signal-semantik: rd_addr syns av BRAM vid N+1, data ut efter N+1-kant)
 --   3. Ackumulera n = antal levande grannar
 --   4. Self_alive sparas separat
 --   5. Berakna ny status enligt Conway's regel
@@ -32,7 +33,7 @@ entity gol_engine is
 end entity gol_engine;
 
 architecture rtl of gol_engine is
-    type state_t is (S_IDLE, S_FETCH, S_DRAIN, S_WRITE, S_DONE);
+    type state_t is (S_IDLE, S_FETCH, S_DRAIN, S_DRAIN2, S_WRITE, S_DONE);
     signal state : state_t := S_IDLE;
 
     signal cur_x : unsigned(6 downto 0) := (others => '0');  -- 0..79
@@ -40,8 +41,10 @@ architecture rtl of gol_engine is
 
     -- Fetch-index: 0..8 (0..7 = 8 grannar, 8 = self)
     signal fetch_idx  : integer range 0 to 9 := 0;
-    -- Recv-index: foljer fetch_idx med 1 cykels forsening (BRAM-latens)
-    signal recv_idx   : integer range 0 to 9 := 0;
+    -- Recv-index: okat vid varje S_FETCH/S_DRAIN cykel.
+    -- BRAM-latens ar 2 cykler: data for fetch F antas vid recv_idx = F+2.
+    -- Vi samplar: if recv_idx >= 2 then slot = recv_idx - 2.
+    signal recv_idx   : integer range 0 to 10 := 0;
 
     signal nbr_count  : unsigned(3 downto 0) := (others => '0');
     signal self_alive : std_logic := '0';
@@ -140,11 +143,11 @@ begin
                     rd_addr <= ar.addr;
                     cur_valid(fetch_idx) <= ar.valid;
 
-                    -- Sampla data fran forra cykelns lasning (recv_idx)
-                    -- recv_idx 1 means we have data for fetch 0 (issued last cycle)
-                    if recv_idx > 0 then
-                        if cur_valid(recv_idx - 1) = '1' then
-                            if recv_idx - 1 < 8 then
+                    -- Sampla data: BRAM-latens ar 2 cykler fran att vi saetter rd_addr
+                    -- till att data ar stabilt. Slot = recv_idx - 2.
+                    if recv_idx >= 2 then
+                        if cur_valid(recv_idx - 2) = '1' then
+                            if recv_idx - 2 < 8 then
                                 nbr_count <= nbr_count + ("000" & rd_data);
                             else
                                 self_alive <= rd_data;
@@ -153,8 +156,8 @@ begin
                     end if;
 
                     if fetch_idx = 8 then
-                        -- All 9 reads issued (indices 0..8), recv_idx will be 9 after increment
-                        -- We still need to drain the last read (fetch_idx=8, i.e. self)
+                        -- Alla 9 adresser utskickade (index 0..8).
+                        -- Vi behover 2 drain-cykler for att tappa sista 2 svaren.
                         fetch_idx <= 0;
                         state     <= S_DRAIN;
                         recv_idx  <= recv_idx + 1;
@@ -164,9 +167,21 @@ begin
                     end if;
 
                 when S_DRAIN =>
-                    -- recv_idx = 9 here, drain index 8 (self)
-                    if cur_valid(recv_idx - 1) = '1' then
-                        if recv_idx - 1 < 8 then
+                    -- recv_idx = 9 har. Med 2-cykels latens: slot = recv_idx - 2 = 7 (granne 7).
+                    if cur_valid(recv_idx - 2) = '1' then
+                        if recv_idx - 2 < 8 then
+                            nbr_count <= nbr_count + ("000" & rd_data);
+                        else
+                            self_alive <= rd_data;
+                        end if;
+                    end if;
+                    recv_idx <= recv_idx + 1;
+                    state    <= S_DRAIN2;
+
+                when S_DRAIN2 =>
+                    -- recv_idx = 10 har. Slot = recv_idx - 2 = 8 (self).
+                    if cur_valid(recv_idx - 2) = '1' then
+                        if recv_idx - 2 < 8 then
                             nbr_count <= nbr_count + ("000" & rd_data);
                         else
                             self_alive <= rd_data;
