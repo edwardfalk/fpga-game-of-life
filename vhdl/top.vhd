@@ -116,7 +116,7 @@ begin
             clk         => clk25,
             reset_n     => '1',
             start       => engine_start,
-            toroidal    => '1',
+            toroidal    => not sw(9),
             src_buffer  => cur_buf,
             dst_buffer  => not cur_buf,
             rd_addr     => engine_rd_addr,
