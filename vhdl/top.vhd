@@ -190,13 +190,19 @@ begin
             vsync_pulse => vsync_pulse
         );
 
-    -- Population 0..4800. 10 LEDR-steg -> ~480 per steg.
+    -- Population VU-meter med logaritmisk skala:
+    --   LEDR(0) tands nar pop >= 2  (2^1)
+    --   LEDR(1) tands nar pop >= 4  (2^2)
+    --   ...
+    --   LEDR(9) tands nar pop >= 1024 (2^10)
+    -- Detta ger synlig respons redan fran ett glider (5 celler tander LEDR 0-1).
+    -- R-pentomino pa ~1100 celler tander alla 10 LEDR.
     ledr_gen: process(engine_pop_out)
         variable v : integer;
     begin
         v := to_integer(engine_pop_out);
         for i in 0 to 9 loop
-            if v >= (i+1) * 480 then
+            if v >= 2**(i+1) then
                 ledr(i) <= '1';
             else
                 ledr(i) <= '0';
