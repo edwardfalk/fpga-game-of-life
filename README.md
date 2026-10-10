@@ -1,100 +1,126 @@
-# Conway's Game of Life på DE0-CV
+# Conway's Game of Life on an FPGA
 
-VHDL-implementation av Conway's Game of Life på Terasic DE0-CV med VGA-utgång,
-80×60 cell-rutnät, 8 klassiska preset-mönster och interaktiv styrning.
+*[Svensk version](README.sv.md)*
 
-## Funktioner
+Conway's Game of Life in VHDL on a Terasic DE0-CV board (Cyclone V), drawn on a VGA monitor: an
+80×60 grid of 8×8-pixel cells at 640×480, 60 Hz. My own project in the Digital Electronics course
+(Digitalteknik) at Yrgo, Gothenburg, spring 2026.
 
-- 640×480 @ 60 Hz VGA-output, cellerna renderas som 8×8 pixel-block i grönt mot
-  svart bakgrund
-- 8 förinitierade mönster valbara via switchar:
-  Glider, Blinker, R-pentomino, Gosper-gun, LWSS, Acorn, Toad, Diehard
-- Paus/stega/auto-run-kontroller med justerbar hastighet (1-60 generationer/sek)
-- Toroidal eller finit kantbeteende
-- Generationsräknare på HEX0-3
-- Logaritmisk population-VU-meter på LEDR[9:0]
+[![The Gosper glider gun on the VGA monitor, firing gliders towards the lower right](docs/glider-gun.jpg)](https://edwardfalk.com/video/game-of-life.mp4)
 
-## Bygg och flasha
+*The Gosper glider gun running on the board. [Watch the 13 s clip →](https://edwardfalk.com/video/game-of-life.mp4)*
 
-```bash
-# Kompilera (~30-60s)
-/home/ed/altera_lite/25.1std/quartus/bin/quartus_sh --flow compile gol
+## Features
 
-# Flasha till kort via JTAG (kortets RUN/PROG-switch i RUN)
-/home/ed/altera_lite/25.1std/quartus/bin/quartus_pgm -m jtag -o "p;output_files/gol.sof"
+- 640×480 VGA at 60 Hz from a 25 MHz pixel clock, cells drawn green on black
+- Eight preset patterns in ROM, picked with the switches: glider, blinker, R-pentomino, Gosper
+  glider gun, LWSS, acorn, toad and diehard
+- Pause, single-step, or run at 1 to 60 generations a second
+- Edges that wrap around (toroidal) or that cells die at (finite)
+- A generation counter on the 7-segment displays and the population as a logarithmic meter on the
+  LEDs
+
+## How it works
+
+The grid is held in two 4800×1-bit block-RAM buffers, one M10K block each. The renderer shows one
+buffer while `gol_engine` computes the next generation into the other, and the buffers swap when the
+engine is done. The engine walks the grid cell by cell: it reads the eight neighbours and the cell
+itself, one read per clock, counts the live neighbours and writes the cell's new state.
+
+```
+50 MHz ─► clk25_div ─► 25 MHz, clocks everything below
+
+KEY[3:1] ─► debounce ×3 ─► control_fsm ─► pattern_loader ◄─ pattern_rom
+                                │                │
+                                ▼                ▼
+                           gol_engine ◄────► grid_bram (two buffers, 2 × M10K)
+                                                 │
+                                                 ▼
+                           vga_renderer (+ vga_timing) ─► VGA R/G/B/HS/VS
 ```
 
-## Användning
-
-| Kontroll | Funktion |
+| Module | Job |
 |---|---|
-| `SW[2:0]` | Välj startmönster (0-7) |
-| `SW[5:3]` | Hastighet: 0=1 gen/sek, 7=60 gen/sek |
-| `SW[9]` | Kantmode: ner=toroidal (wrap), upp=finit (dö) |
-| `KEY[3]` | Ladda valt mönster och pausa |
-| `KEY[2]` | Pause/run-toggla |
-| `KEY[1]` | Stega en generation (i pausläge) |
-| `KEY[0]` | Reserv |
-| `HEX0-3` | Generationsräknare (0-9999, wrappar) |
-| `HEX4` | "P" när pausad |
-| `HEX5` | Avsiktligt släckt |
-| `LEDR[9:0]` | Populations-VU-meter (logaritmisk: 2, 4, 8, ..., 1024 celler) |
+| `clk25_div` | Divides the 50 MHz board clock down to the 25 MHz pixel clock |
+| `vga_timing` | 640×480 at 60 Hz sync pulses and pixel counters, inside `vga_renderer` |
+| `vga_renderer` | Maps each pixel to its cell and picks the colour |
+| `grid_bram` | The two grid buffers, written so Quartus infers block RAM |
+| `gol_engine` | The next-generation state machine, edge mode and population count |
+| `pattern_rom`, `pattern_loader` | The eight presets, copied into the grid on KEY[3] |
+| `control_fsm` | Pause, step and run, with the speed divider |
+| `debounce` | Two-flip-flop synchroniser, 20 ms debounce and a press pulse per key |
+| `hex_decoder` | 7-segment digits |
+| `top` | Wiring, the LED meter and the displays |
 
-## Mönster
+## Controls
 
-| Index (SW[2:0]) | Namn | Beteende |
+| Control | Function |
+|---|---|
+| `SW[2:0]` | Start pattern (0–7) |
+| `SW[5:3]` | Speed: 0 = 1 generation a second, 7 = 60 |
+| `SW[9]` | Edges: down = wrap around, up = finite |
+| `KEY[3]` | Load the selected pattern and pause |
+| `KEY[2]` | Pause / run |
+| `KEY[1]` | Step one generation (while paused) |
+| `KEY[0]` | Unused |
+| `HEX0-3` | Generation counter (0–9999, wraps) |
+| `HEX4` | "P" while paused |
+| `HEX5` | Always dark (see hardware notes) |
+| `LEDR[9:0]` | Population, logarithmic: 2, 4, 8 … 1024 cells |
+
+## Patterns
+
+| `SW[2:0]` | Pattern | Behaviour |
 |---|---|---|
-| 0 | Glider | Förflyttar sig diagonalt evigt |
-| 1 | Blinker | Oscillerar period 2 |
-| 2 | R-pentomino | Methusalem - kaotisk i ~1100 generationer |
-| 3 | Gosper-gun | Producerar oändligt med glidare |
-| 4 | LWSS | Lättviktigt rymdskepp |
-| 5 | Acorn | Methusalem - växer till 633 celler över ~5206 gen |
-| 6 | Toad | Oscillator period 2 |
-| 7 | Diehard | Försvinner helt efter exakt 130 generationer |
+| 0 | Glider | Travels diagonally forever |
+| 1 | Blinker | Oscillates with period 2 |
+| 2 | R-pentomino | Methuselah, chaotic for about 1100 generations |
+| 3 | Gosper glider gun | Fires a new glider every 30 generations |
+| 4 | LWSS | Lightweight spaceship |
+| 5 | Acorn | Methuselah, grows to 633 cells over about 5206 generations |
+| 6 | Toad | Oscillates with period 2 |
+| 7 | Diehard | Dies out after exactly 130 generations |
 
-## Simulering
+## Simulation
+
+The core modules have GHDL testbenches, ten of them in `tb/`:
 
 ```bash
-make tb_<modname>    # kör en testbänk (ex. tb_gol_engine)
-make wave_<modname>  # öppna VCD i GTKWave
+make tb_<module>    # run one testbench, e.g. make tb_gol_engine_glider
+make wave_<module>  # open its VCD in GTKWave
 make clean
 ```
 
-Testbänkar: `tb_clk25_div`, `tb_vga_timing`, `tb_grid_bram`, `tb_vga_renderer`,
-`tb_pattern_rom`, `tb_pattern_loader`, `tb_gol_engine`, `tb_gol_engine_glider`,
-`tb_gol_engine_pop`, `tb_control_fsm`.
+## Building
 
-## Arkitektur
+Quartus Prime Lite 25.1, device 5CEBA4F23C7. The pin assignments in `gol.qsf` follow Terasic's
+DE0-CV golden-top reference.
 
-```
-50MHz ──► clk25_div ──► clk25 ──┬─► vga_renderer ──► VGA (R/G/B/HS/VS)
-                                ├─► vga_timing
-                                ├─► control_fsm ◄── debouncad KEY
-                                ├─► pattern_loader (KEY[3] trigger)
-                                │       │
-                                │       ▼
-                                │   pattern_rom
-                                │       │
-                                │       ▼
-                                └─► gol_engine ──► grid_bram (ping-pong M10K)
-                                                       │
-                                                       ▼
-                                                   vga_renderer
+```bash
+quartus_sh --flow compile gol
+quartus_pgm -m jtag -o "p;output_files/gol.sof"   # board's RUN/PROG switch in RUN
 ```
 
-Detaljerad spec: `docs/superpowers/specs/2026-05-23-game-of-life-vga-design.md`
-Implementationsplan: `docs/superpowers/plans/2026-05-23-game-of-life-vga.md`
+Resource use: 805 of 18,480 ALMs (4 %), 317 registers, 2 of 308 M10K blocks and 81 pins.
 
-## Pinout-källa
+## Two bugs worth knowing about
 
-Alla pin-assignments verifierade mot DE0-CV golden top-referens:
-`/home/ed/altera_lite/25.1std/quartus/common/devplatforms/DE0_CV_golden_top/DE0_CV_golden_top.qar`
+- **169 % of the chip.** The first `grid_bram` chose between its two buffers inside the RAM
+  processes, so Quartus couldn't infer block RAM and built the grid from logic instead:
+  31,268 ALMs, 169 % of the device. Splitting it into two separate RAM entities, with the buffer
+  select outside them, brought it down to 188 ALMs and 2 M10K blocks.
+- **Off by one read.** The engine assumed a block-RAM read answers on the next clock, but in this
+  design the data arrives two clocks after the address is set. Every neighbour landed one slot off.
+  The blinker testbench still passed, because the blinker is symmetric and the errors cancelled out,
+  but gliders drifted sideways one cell per generation instead of moving diagonally. The fix came
+  with a glider testbench that uses the real `grid_bram`.
 
-Extrahera med `quartus_sh --restore` - pinnarna ligger i `platform_setup.tcl`.
+## Hardware notes
 
-## Anteckningar om hårdvaran
+The DE0-CV this was built on has two dead segments (d and e) on HEX5, so the design leaves HEX5
+dark. On a healthy board, HEX5 is free for more information.
 
-Detta projekt körs på det DE0-CV-kort som har **HEX5 segment d och e döda**.
-Designen undviker HEX5 (alltid släckt). Om du flyttar designen till ett annat kort,
-kan du lägga information på HEX5 också.
+## Credits
+
+Written together with [Claude Code](https://claude.com/claude-code) as a pair programmer: most
+commits carry a `Co-Authored-By: Claude` line.
