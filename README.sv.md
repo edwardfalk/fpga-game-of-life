@@ -16,16 +16,6 @@ VHDL-implementation av Conway's Game of Life på Terasic DE0-CV med VGA-utgång,
 - Generationsräknare på HEX0-3
 - Logaritmisk population-VU-meter på LEDR[9:0]
 
-## Bygg och flasha
-
-```bash
-# Kompilera (~30-60s)
-quartus_sh --flow compile gol
-
-# Flasha till kort via JTAG (kortets RUN/PROG-switch i RUN)
-quartus_pgm -m jtag -o "p;output_files/gol.sof"
-```
-
 ## Användning
 
 | Kontroll | Funktion |
@@ -66,31 +56,6 @@ make clean
 Testbänkar: `tb_clk25_div`, `tb_vga_timing`, `tb_grid_bram`, `tb_vga_renderer`,
 `tb_pattern_rom`, `tb_pattern_loader`, `tb_gol_engine`, `tb_gol_engine_glider`,
 `tb_gol_engine_pop`, `tb_control_fsm`.
-
-## Arkitektur
-
-```
-50MHz ──► clk25_div ──► clk25 ──┬─► vga_renderer ──► VGA (R/G/B/HS/VS)
-                                ├─► vga_timing
-                                ├─► control_fsm ◄── debouncad KEY
-                                ├─► pattern_loader (KEY[3] trigger)
-                                │       │
-                                │       ▼
-                                │   pattern_rom
-                                │       │
-                                │       ▼
-                                └─► gol_engine ──► grid_bram (ping-pong M10K)
-                                                       │
-                                                       ▼
-                                                   vga_renderer
-```
-
-## Pinout-källa
-
-Alla pin-assignments verifierade mot DE0-CV golden top-referens:
-`<quartus>/common/devplatforms/DE0_CV_golden_top/DE0_CV_golden_top.qar`
-
-Extrahera med `quartus_sh --restore` - pinnarna ligger i `platform_setup.tcl`.
 
 ## Anteckningar om hårdvaran
 
